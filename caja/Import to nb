@@ -2,4 +2,4 @@
 # Caja script shim — delegates to the nb import plugin.
 # Caja passes selected files via $CAJA_SCRIPT_SELECTED_FILE_PATHS (newline-separated plain paths).
 # nb import auto-detects this calling convention when invoked with no arguments.
-exec "$HOME/.local/bin/nb" send
+exec nb send

@@ -14,7 +14,7 @@ echo "nb-desktop install"
 echo "------------------"
 
 # ── nb import plugin ──────────────────────────────────────────────────────────
-NB_BIN="$(command -v nb 2>/dev/null || echo "$HOME/.local/bin/nb")"
+NB_BIN="$(command -v nb 2>/dev/null || echo "/usr/local/bin/nb")"
 
 if [[ ! -x "$NB_BIN" ]]; then
     echo "ERROR: nb not found. Install nb first: https://xwmx.github.io/nb/"
