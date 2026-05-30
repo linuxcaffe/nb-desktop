@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Import to nb
+Comment=Import this file into an nb notebook
+Exec=/home/djp/.local/bin/nb-import %f
+Icon-Name=document-save-as
+Selection=any
+Extensions=any;

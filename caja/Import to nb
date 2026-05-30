@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Caja script shim for nb-import.
+# Caja passes selected files via $CAJA_SCRIPT_SELECTED_FILE_PATHS (newline-separated plain paths).
+# The main script auto-detects this calling convention when called with no arguments.
+exec "$HOME/.local/bin/nb-import"

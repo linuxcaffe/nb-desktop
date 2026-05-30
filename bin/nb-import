@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# nb-import — import a file into an nb notebook via a two-step zenity dialog.
+#
+# Calling conventions (auto-detected):
+#   Nemo action:   nb-import <file:///path/to/file>   (URI argument)
+#   Caja script:   nb-import                           (paths in $CAJA_SCRIPT_SELECTED_FILE_PATHS)
+#   Terminal:      nb-import /path/to/file             (plain path argument)
+
+set -euo pipefail
+
+NB_DIR="${NB_DIR:-$HOME/.nb}"
+NB_BIN="$(command -v nb 2>/dev/null || echo "$HOME/.local/bin/nb")"
+
+# ── Resolve file path from argument or env var ────────────────────────────────
+decode_uri() {
+    local p="${1#file://}"
+    printf '%b\n' "${p//%/\\x}"
+}
+
+if [[ -n "${1:-}" ]]; then
+    FILE="$(decode_uri "$1")"
+else
+    # Caja/Nautilus script env var — take the first file
+    SELECTED="${CAJA_SCRIPT_SELECTED_FILE_PATHS:-${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-}}"
+    if [[ -z "$SELECTED" ]]; then
+        zenity --error --title="nb import" \
+               --text="No file provided.\n\nRun from a file manager or pass a file path as an argument." \
+               2>/dev/null
+        exit 1
+    fi
+    FILE="$(head -1 <<< "$SELECTED")"
+fi
+
+[[ -f "$FILE" ]] || {
+    zenity --error --title="nb import" --text="File not found:\n$FILE" 2>/dev/null
+    exit 1
+}
+
+BASENAME="$(basename "$FILE")"
+STEM="${BASENAME%.*}"
+
+# ── Step 1: Choose notebook ───────────────────────────────────────────────────
+mapfile -t NB_NAMES < <(
+    "$NB_BIN" notebooks --no-color 2>/dev/null \
+    | sed 's/[[:space:]].*//' \
+    | grep -v '^$'
+)
+
+NOTEBOOK=$(zenity --list \
+    --title="Import to nb  (1/2)" \
+    --text="Importing: <b>$BASENAME</b>\n\nChoose a notebook:" \
+    --column="Notebook" \
+    "${NB_NAMES[@]}" \
+    --height=380 --width=380 2>/dev/null) || exit 0
+
+[[ -z "$NOTEBOOK" ]] && exit 0
+
+# ── Step 2: Folder + details ──────────────────────────────────────────────────
+mapfile -t SUBFOLDERS < <(
+    find "$NB_DIR/$NOTEBOOK" -mindepth 1 -maxdepth 2 \
+        -type d ! -name '.*' ! -path '*/.git*' 2>/dev/null \
+    | sed "s|$NB_DIR/$NOTEBOOK/||" \
+    | sort
+)
+
+FOLDER_VALUES="(root)"
+for sub in "${SUBFOLDERS[@]}"; do
+    FOLDER_VALUES+="|$sub"
+done
+
+RESULT=$(zenity --forms \
+    --title="Import to nb  (2/2)" \
+    --text="Notebook: <b>$NOTEBOOK</b>    File: <b>$BASENAME</b>\n\nLeave Title / Filename blank to use defaults." \
+    --add-combo="Folder" --combo-values="$FOLDER_VALUES" \
+    --add-entry="Title  (default: $STEM)" \
+    --add-entry="Filename  (default: $BASENAME)" \
+    --separator="§" \
+    --width=440 2>/dev/null) || exit 0
+
+[[ -z "$RESULT" ]] && exit 0
+
+FOLDER_RAW="$(cut -d'§' -f1 <<< "$RESULT")"
+TITLE_IN="$(cut   -d'§' -f2 <<< "$RESULT")"
+FILENAME_IN="$(cut -d'§' -f3 <<< "$RESULT")"
+
+[[ "$FOLDER_RAW" == "(root)" ]] && FOLDER="" || FOLDER="$FOLDER_RAW"
+[[ -z "$TITLE_IN"    ]] && TITLE_IN="$STEM"
+[[ -z "$FILENAME_IN" ]] && FILENAME_IN="$BASENAME"
+
+# ── Copy + index ──────────────────────────────────────────────────────────────
+TARGET_DIR="$NB_DIR/$NOTEBOOK${FOLDER:+/$FOLDER}"
+mkdir -p "$TARGET_DIR"
+cp "$FILE" "$TARGET_DIR/$FILENAME_IN"
+
+INDEX="$TARGET_DIR/.index"
+touch "$INDEX"
+grep -qxF "$FILENAME_IN" "$INDEX" || echo "$FILENAME_IN" >> "$INDEX"
+
+# ── Git commit ────────────────────────────────────────────────────────────────
+REL_PATH="${FOLDER:+$FOLDER/}$FILENAME_IN"
+git -C "$NB_DIR/$NOTEBOOK" add -- "$REL_PATH" "${FOLDER:+$FOLDER/}.index" 2>/dev/null || true
+git -C "$NB_DIR/$NOTEBOOK" commit -m "[nb] Import: $REL_PATH" 2>/dev/null || true
+
+# ── Done ──────────────────────────────────────────────────────────────────────
+zenity --info \
+    --title="nb import" \
+    --text="✓ <b>$FILENAME_IN</b>\nimported to <b>$NOTEBOOK${FOLDER:+/$FOLDER}</b>" \
+    --width=360 2>/dev/null || true
