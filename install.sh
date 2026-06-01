@@ -65,3 +65,9 @@ fi
 
 echo ""
 echo "Done. Try right-clicking a file in your file manager."
+
+# ── PATH binaries ─────────────────────────────────────────────────────────────
+mkdir -p "$HOME/.local/bin"
+cp "$SCRIPT_DIR/bin/nb-new-item" "$HOME/.local/bin/nb-new-item"
+chmod +x "$HOME/.local/bin/nb-new-item"
+echo "✓ nb-new-item → $HOME/.local/bin/nb-new-item"
