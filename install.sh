@@ -54,7 +54,11 @@ if command -v caja &>/dev/null; then
     cp "$SCRIPT_DIR/caja/Import to nb" "$DEST/Import to nb"
     chmod +x "$DEST/Import to nb"
     echo "✓ Caja script → $DEST/Import to nb"
-    echo "  Right-click a file → Scripts → Import to nb"
+
+    cp "$SCRIPT_DIR/caja/Add New Item" "$DEST/Add New Item"
+    chmod +x "$DEST/Add New Item"
+    echo "✓ Caja script → $DEST/Add New Item"
+    echo "  Right-click an image → Scripts → Add New Item"
 else
     echo "  Caja not found, skipping"
 fi

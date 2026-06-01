@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Caja script shim — delegates to nb-new-item.
+# Caja passes selected files via $CAJA_SCRIPT_SELECTED_FILE_PATHS (newline-separated plain paths).
+exec "$(dirname "$(readlink -f "$0")")/../bin/nb-new-item"
