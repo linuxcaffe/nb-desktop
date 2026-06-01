@@ -8,6 +8,8 @@ Powered by [send.nb-plugin](https://github.com/linuxcaffe/nb-plugins/blob/main/s
 
 ## What it does
 
+### Import to nb — general file import
+
 Right-click a file → **Scripts → Import to nb** (Caja) or **Import to nb** (Nemo):
 
 1. **Choose a notebook** — all your nb notebooks listed
@@ -16,6 +18,24 @@ Right-click a file → **Scripts → Import to nb** (Caja) or **Import to nb** (
 Files with unrecognised MIME types (executables, unknown binaries) trigger a warning before import. The actual file copy, `.index` entry, and git commit are handled by nb's own `import copy` — nothing is reinvented.
 
 All activity is logged to `/tmp/nb-send.log`.
+
+---
+
+### Add New Item — image + item note (nb-website workflow)
+
+Right-click an image → **Scripts → Add New Item** (Caja):
+
+1. **Choose a notebook** — all your nb notebooks listed
+2. **Confirm the base name** — defaults to the image filename stem (e.g. `ABC001`)
+
+The script then:
+- Copies the image to `images/ABC001.jpg` in the notebook
+- Creates `items/ABC001.md` from the item template (`.templates/item.md`), with `image:`, `title:`, and `date:` pre-filled
+- Updates both `.index` files and makes a single git commit
+
+Designed for [nb-website](https://github.com/linuxcaffe/nb-website) workflows where image and item note share the same base filename. Open nb-web after to fill in the remaining item fields.
+
+All activity is logged to `/tmp/nb-new-item.log`.
 
 ---
 
@@ -59,6 +79,7 @@ nb plugin install https://raw.githubusercontent.com/linuxcaffe/nb-plugins/main/s
 
 ### From Caja
 Right-click any file → **Scripts → Import to nb**
+Right-click an image → **Scripts → Add New Item**
 
 ### From Nemo
 Right-click any file → **Import to nb**
@@ -67,7 +88,7 @@ Right-click any file → **Import to nb**
 ```bash
 nb send ~/Pictures/photo.jpg
 nb send ~/Documents/report.pdf
-nb send file:///home/djp/archive/note.md   # URI form (as passed by Nemo)
+nb-new-item ~/Pictures/ABC001.jpg
 ```
 
 ---
@@ -84,14 +105,15 @@ nb send file:///home/djp/archive/note.md   # URI form (as passed by Nemo)
 ## Repo layout
 
 ```
+bin/
+  nb-new-item           # Add New Item main script (installed to ~/.local/bin/)
 caja/
-  Import to nb          # Caja script shim — exec nb send
+  Import to nb          # Caja shim — exec nb send
+  Add New Item          # Caja shim — exec nb-new-item
 nemo/
   nb-import.nemo_action # Nemo action definition
-install.sh              # Installs plugin + file manager hooks
+install.sh              # Installs plugin + file manager hooks + nb-new-item
 ```
-
-The `bin/` directory (standalone `nb-import` script) was retired when the logic moved into `send.nb-plugin`.
 
 ---
 
