@@ -44,6 +44,8 @@ else
 fi
 
 # ── Caja ─────────────────────────────────────────────────────────────────────
+# Symlinked, not copied -- one copy of the code lives in this repo; editing
+# it here takes effect immediately, nothing to fall out of sync or get lost.
 if command -v caja &>/dev/null; then
     if [[ -d "$CAJA_SCRIPTS" ]]; then
         DEST="$CAJA_SCRIPTS"
@@ -51,14 +53,13 @@ if command -v caja &>/dev/null; then
         DEST="$CAJA_SCRIPTS_ALT"
         mkdir -p "$DEST"
     fi
-    cp "$SCRIPT_DIR/caja/Import to nb" "$DEST/Import to nb"
-    chmod +x "$DEST/Import to nb"
-    echo "✓ Caja script → $DEST/Import to nb"
+    chmod +x "$SCRIPT_DIR/caja/Import to nb" "$SCRIPT_DIR/caja/Add New Item"
+    ln -sf "$SCRIPT_DIR/caja/Import to nb" "$DEST/Import to nb"
+    echo "✓ Caja script → $DEST/Import to nb (symlink)"
 
-    cp "$SCRIPT_DIR/caja/Add New Item" "$DEST/Add New Item"
-    chmod +x "$DEST/Add New Item"
-    echo "✓ Caja script → $DEST/Add New Item"
-    echo "  Right-click an image → Scripts → Add New Item"
+    ln -sf "$SCRIPT_DIR/caja/Add New Item" "$DEST/Add New Item"
+    echo "✓ Caja script → $DEST/Add New Item (symlink)"
+    echo "  Right-click image(s) → Scripts → Add New Item"
 else
     echo "  Caja not found, skipping"
 fi
@@ -68,6 +69,6 @@ echo "Done. Try right-clicking a file in your file manager."
 
 # ── PATH binaries ─────────────────────────────────────────────────────────────
 mkdir -p "$HOME/.local/bin"
-cp "$SCRIPT_DIR/bin/nb-new-item" "$HOME/.local/bin/nb-new-item"
-chmod +x "$HOME/.local/bin/nb-new-item"
-echo "✓ nb-new-item → $HOME/.local/bin/nb-new-item"
+chmod +x "$SCRIPT_DIR/bin/nb-new-item"
+ln -sf "$SCRIPT_DIR/bin/nb-new-item" "$HOME/.local/bin/nb-new-item"
+echo "✓ nb-new-item → $HOME/.local/bin/nb-new-item (symlink)"

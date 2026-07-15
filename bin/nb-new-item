@@ -1,71 +1,99 @@
 #!/usr/bin/env bash
-# nb-new-item — import an image and create a matching item note in an nb notebook.
+# nb-new-item — create a shop item (one or more images) via nb-web's
+# /api/item/new. Designed for preciousfinds-style workflows: select one or
+# more images in a file manager's icon view (real thumbnails, real
+# multi-select — the whole point of routing through here instead of a
+# browser's bare file-open dialog) and right-click "Add New Item".
 #
-# Designed for preciousfinds-style workflows: image and item note share the same
-# base filename (e.g. ABC001.jpg → images/ABC001.jpg + items/ABC001.md).
+# The first selected image becomes the item's primary image; any further
+# selected images are supplemental, auto-suffixed by the server
+# (code.ext, code-1.ext, code-2.ext, ...). Code (filename/accounting
+# reference) and title (descriptive text) are distinct fields -- both
+# prompted for, matching the item specialty header's own "+ New" flow in
+# nb-web, which this script mirrors (same /api/item/new call, same
+# one-item-per-N-images semantics).
 #
 # Calling conventions (auto-detected):
-#   Caja script:   nb-new-item                           (paths in $CAJA_SCRIPT_SELECTED_FILE_PATHS)
-#   Terminal:      nb-new-item /path/to/image            (plain path argument)
-#   Nemo action:   nb-new-item <file:///path/to/image>   (URI argument)
+#   Caja script:   nb-new-item                             (paths in $CAJA_SCRIPT_SELECTED_FILE_PATHS, newline-separated, one or more)
+#   Terminal:      nb-new-item /path/a.jpg /path/b.jpg ...  (one or more plain path arguments)
+#   Nemo action:   nb-new-item <file:///path/to/image>      (single URI argument)
+#
+# Requires: zenity, curl, jq. Requires nb-web running (default
+# http://127.0.0.1:5001 -- override with NB_WEB_URL) and a local API token
+# at $(dirname "$(readlink -f "$0")")/../../dev/nb-web/.api_token, or set
+# NB_WEB_API_TOKEN directly.
 
 LOG="/tmp/nb-new-item.log"
 exec > >(tee -a "$LOG") 2>&1
 echo "--- nb-new-item $(date) ---"
 
-NB_DIR="${NB_DIR:-$HOME/.nb}"
-NB_BIN="$(command -v nb 2>/dev/null || echo "$HOME/.local/bin/nb")"
+NB_WEB_URL="${NB_WEB_URL:-http://127.0.0.1:5001}"
+TOKEN_FILE="${NB_WEB_API_TOKEN_FILE:-$HOME/dev/nb-web/.api_token}"
 
-# ── Resolve file path ─────────────────────────────────────────────────────────
+# ── Resolve file path(s) ────────────────────────────────────────────────────
 decode_uri() {
     local p="${1#file://}"
     printf '%b\n' "${p//%/\\x}"
 }
 
-if [[ -n "${1:-}" ]]; then
-    FILE="$(decode_uri "$1")"
-    echo "source: argument"
+FILES=()
+if [[ $# -gt 0 ]]; then
+    for arg in "$@"; do
+        FILES+=("$(decode_uri "$arg")")
+    done
+    echo "source: arguments (${#FILES[@]})"
 else
     SELECTED="${CAJA_SCRIPT_SELECTED_FILE_PATHS:-${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-}}"
     if [[ -z "$SELECTED" ]]; then
         zenity --error --title="nb new item" \
-               --text="No file provided.\n\nRun from a file manager or pass a path as an argument." \
+               --text="No file provided.\n\nRun from a file manager or pass path(s) as arguments." \
                2>/dev/null
         exit 1
     fi
-    FILE="$(head -1 <<< "$SELECTED")"
-    echo "source: env var"
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && FILES+=("$line")
+    done <<< "$SELECTED"
+    echo "source: env var (${#FILES[@]})"
 fi
 
-echo "file: $FILE"
+for f in "${FILES[@]}"; do
+    if [[ ! -f "$f" ]]; then
+        zenity --error --title="nb new item" --text="File not found:\n$f" 2>/dev/null
+        exit 1
+    fi
+done
+echo "files: ${FILES[*]}"
 
-if [[ ! -f "$FILE" ]]; then
-    zenity --error --title="nb new item" --text="File not found:\n$FILE" 2>/dev/null
+FIRST_BASENAME="$(basename "${FILES[0]}")"
+if [[ "$FIRST_BASENAME" == *.* && "${FIRST_BASENAME:0:1}" != "." ]]; then
+    STEM="${FIRST_BASENAME%.*}"
+else
+    STEM="$FIRST_BASENAME"
+fi
+
+# ── nb-web reachable + token present ────────────────────────────────────────
+if [[ ! -f "$TOKEN_FILE" ]]; then
+    zenity --error --title="nb new item" \
+           --text="No API token found at:\n<tt>$TOKEN_FILE</tt>\n\nStart nb-web once to generate it, or set NB_WEB_API_TOKEN_FILE." \
+           2>/dev/null
     exit 1
 fi
+API_TOKEN="$(<"$TOKEN_FILE")"
 
-BASENAME="$(basename "$FILE")"
-if [[ "$BASENAME" == *.* && "${BASENAME:0:1}" != "." ]]; then
-    EXT=".${BASENAME##*.}"
-    STEM="${BASENAME%.*}"
-else
-    EXT=""
-    STEM="$BASENAME"
-fi
-echo "basename: $BASENAME  stem: $STEM  ext: ${EXT:-(none)}"
-
-# ── Step 1: Notebook ──────────────────────────────────────────────────────────
+# ── Step 1: Notebook ─────────────────────────────────────────────────────────
+NB_BIN="$(command -v nb 2>/dev/null || echo "$HOME/.local/bin/nb")"
 mapfile -t NB_NAMES < <(
     "$NB_BIN" notebooks --no-color 2>/dev/null \
     | sed 's/[[:space:]].*//' \
     | grep -v '^$' || true
 )
-
 echo "notebooks: ${NB_NAMES[*]}"
+
+IMG_LABEL="${FIRST_BASENAME}$([[ ${#FILES[@]} -gt 1 ]] && echo " (+$((${#FILES[@]}-1)) more)")"
 
 if ! NOTEBOOK=$(zenity --list \
         --title="New Item  (1/2)" \
-        --text="Image: <b>$BASENAME</b>\n\nChoose a notebook:" \
+        --text="Image: <b>$IMG_LABEL</b>\n\nChoose a notebook:" \
         --column="Notebook" \
         "${NB_NAMES[@]}" \
         --height=380 --width=380 2>/dev/null); then
@@ -75,100 +103,60 @@ fi
 [[ -z "$NOTEBOOK" ]] && { echo "no notebook selected"; exit 0; }
 echo "notebook: $NOTEBOOK"
 
-# ── Step 2: Base name ─────────────────────────────────────────────────────────
+# ── Step 2: Code + Title ─────────────────────────────────────────────────────
 if ! RESULT=$(zenity --forms \
         --title="New Item  (2/2)" \
-        --text="Notebook: <b>$NOTEBOOK</b>    Image: <b>$BASENAME</b>\n\nThe base name is used for both the image file and the item note.\nLeave blank to keep <b>$STEM</b>." \
-        --add-entry="Base name  (default: $STEM)" \
+        --text="Notebook: <b>$NOTEBOOK</b>    Image: <b>$IMG_LABEL</b>\n\nCode is the filename / accounting reference (e.g. ABC123).\nTitle is the descriptive text." \
+        --add-entry="Code  (default: $STEM)" \
+        --add-entry="Title" \
         --separator="|" \
         --width=460 2>/dev/null); then
-    echo "cancelled at base name form"
+    echo "cancelled at code/title form"
     exit 0
 fi
 
-BASE_IN="$(cut -d'|' -f1 <<< "$RESULT")"
-[[ -z "$BASE_IN" ]] && BASE_IN="$STEM"
-# Strip extension if user typed one
-[[ -n "$EXT" && "$BASE_IN" == *.* ]] && BASE_IN="${BASE_IN%.*}"
+CODE="$(cut -d'|' -f1 <<< "$RESULT")"
+TITLE="$(cut -d'|' -f2 <<< "$RESULT")"
+[[ -z "$CODE" ]] && CODE="$STEM"
 
-IMG_FILENAME="${BASE_IN}${EXT}"
-ITEM_FILENAME="${BASE_IN}.md"
-TODAY="$(date +%Y-%m-%d)"
+if [[ -z "$TITLE" ]]; then
+    zenity --error --title="nb new item" --text="Title is required." 2>/dev/null
+    exit 1
+fi
+echo "code: $CODE  title: $TITLE"
 
-echo "image: $IMG_FILENAME  item: $ITEM_FILENAME  date: $TODAY"
+# ── POST to /api/item/new ────────────────────────────────────────────────────
+CURL_ARGS=(-sS -X POST "$NB_WEB_URL/api/item/new"
+           -H "X-Nbweb-Api-Token: $API_TOKEN"
+           -F "notebook=$NOTEBOOK" -F "code=$CODE" -F "title=$TITLE")
+for f in "${FILES[@]}"; do
+    CURL_ARGS+=(-F "files=@$f")
+done
 
-# ── Copy image → images/ ──────────────────────────────────────────────────────
-IMG_DIR="$NB_DIR/$NOTEBOOK/images"
-mkdir -p "$IMG_DIR"
-cp "$FILE" "$IMG_DIR/$IMG_FILENAME"
-
-IMG_INDEX="$IMG_DIR/.index"
-touch "$IMG_INDEX"
-grep -qxF "$IMG_FILENAME" "$IMG_INDEX" || echo "$IMG_FILENAME" >> "$IMG_INDEX"
-echo "image copied to $IMG_DIR/$IMG_FILENAME"
-
-# ── Create item note from template ────────────────────────────────────────────
-ITEMS_DIR="$NB_DIR/$NOTEBOOK/items"
-TEMPLATE="$ITEMS_DIR/.templates/item.md"
-ITEM_PATH="$ITEMS_DIR/$ITEM_FILENAME"
-
-mkdir -p "$ITEMS_DIR"
-
-if [[ -f "$ITEM_PATH" ]]; then
+if ! RESPONSE="$(curl "${CURL_ARGS[@]}" 2>>"$LOG")"; then
     zenity --error --title="nb new item" \
-           --text="Item note already exists:\n<b>items/$ITEM_FILENAME</b>\n\nChoose a different base name." \
-           2>/dev/null
-    echo "aborted: item already exists"
+           --text="Could not reach nb-web at <tt>$NB_WEB_URL</tt>.\n\nIs it running? Check /tmp/nb-new-item.log for details." \
+           --width=420 2>/dev/null
+    exit 1
+fi
+echo "response: $RESPONSE"
+
+SUCCESS="$(jq -r '.success // false' <<< "$RESPONSE" 2>/dev/null)"
+if [[ "$SUCCESS" != "true" ]]; then
+    ERR="$(jq -r '.error // "unknown error"' <<< "$RESPONSE" 2>/dev/null)"
+    zenity --error --title="nb new item" --text="Failed:\n$ERR" --width=420 2>/dev/null
+    echo "failed: $ERR"
     exit 1
 fi
 
-if [[ -f "$TEMPLATE" ]]; then
-    sed \
-        -e "s|{{title}}|$BASE_IN|g" \
-        -e "s|{{date}}|$TODAY|g" \
-        -e "s|^image:.*|image: $IMG_FILENAME|" \
-        "$TEMPLATE" > "$ITEM_PATH"
-    echo "item created from template"
-else
-    # Fallback: minimal frontmatter matching the standard schema
-    cat > "$ITEM_PATH" <<EOF
----
-title: $BASE_IN
-date: $TODAY
-status: available
-category:
-caption:
-description:
-price:
-qtty:
-image: $IMG_FILENAME
-condition:
-platform:
-listing:
-tags: []
----
-EOF
-    echo "item created with fallback frontmatter (no template found at $TEMPLATE)"
-fi
+ITEM="$(jq -r '.item' <<< "$RESPONSE")"
+N_IMAGES="$(jq -r '.images | length' <<< "$RESPONSE")"
+SELECTOR="$(jq -r '.selector' <<< "$RESPONSE")"
+FAILURES="$(jq -r '.failures | length' <<< "$RESPONSE")"
 
-# ── Update items .index ───────────────────────────────────────────────────────
-ITEM_INDEX="$ITEMS_DIR/.index"
-touch "$ITEM_INDEX"
-grep -qxF "$ITEM_FILENAME" "$ITEM_INDEX" || echo "$ITEM_FILENAME" >> "$ITEM_INDEX"
-echo "item indexed"
+MSG="✓ <b>items/$ITEM.md</b>\n✓ $N_IMAGES image(s)\n\nSaved to notebook: <b>$NOTEBOOK</b>"
+[[ "$FAILURES" != "0" ]] && MSG+="\n\n⚠ $FAILURES image(s) failed — see $LOG"
+MSG+="\n\nOpen nb-web to complete the item details."
 
-# ── Git commit ────────────────────────────────────────────────────────────────
-git -C "$NB_DIR/$NOTEBOOK" add -- \
-    "images/$IMG_FILENAME" "images/.index" \
-    "items/$ITEM_FILENAME" "items/.index" 2>/dev/null || true
-git -C "$NB_DIR/$NOTEBOOK" commit \
-    -m "[nb] New item: $BASE_IN" 2>/dev/null || true
-echo "git committed"
-
-# ── Done ─────────────────────────────────────────────────────────────────────
-zenity --info \
-    --title="nb new item — done" \
-    --text="✓ <b>images/$IMG_FILENAME</b>\n✓ <b>items/$ITEM_FILENAME</b>\n\nSaved to notebook: <b>$NOTEBOOK</b>\n\nOpen nb-web to complete the item details." \
-    --width=400 2>/dev/null || true
-
-echo "done"
+zenity --info --title="nb new item — done" --text="$MSG" --width=400 2>/dev/null || true
+echo "done: $SELECTOR"
