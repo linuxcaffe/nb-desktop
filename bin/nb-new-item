@@ -18,17 +18,74 @@
 #   Terminal:      nb-new-item /path/a.jpg /path/b.jpg ...  (one or more plain path arguments)
 #   Nemo action:   nb-new-item <file:///path/to/image>      (single URI argument)
 #
-# Requires: zenity, curl, jq. Requires nb-web running (default
-# http://127.0.0.1:5001 -- override with NB_WEB_URL) and a local API token
-# at $(dirname "$(readlink -f "$0")")/../../dev/nb-web/.api_token, or set
-# NB_WEB_API_TOKEN directly.
+# Requires: zenity, curl, jq. Requires nb-web running and reachable at
+# NB_WEB_URL (default http://127.0.0.1:5001 -- override for a remote
+# install, e.g. a second real user's own machine: export
+# NB_WEB_URL=http://10.0.0.19:5001, or the Tailscale address).
+#
+# Auth: a real per-user session-cookie login (username/password, prompted
+# via zenity on first use), NOT the shared local .api_token -- that token
+# is bound to one fixed account, so every script invocation using it would
+# be attributed to that one account regardless of who's actually at the
+# keyboard. This is the same login flow a browser uses; the cookie jar is
+# cached locally and reused until it stops working, then re-prompted.
+# Found+fixed 2026-07-16 while setting up a second real (non-dev) user.
 
 LOG="/tmp/nb-new-item.log"
 exec > >(tee -a "$LOG") 2>&1
 echo "--- nb-new-item $(date) ---"
 
 NB_WEB_URL="${NB_WEB_URL:-http://127.0.0.1:5001}"
-TOKEN_FILE="${NB_WEB_API_TOKEN_FILE:-$HOME/dev/nb-web/.api_token}"
+STATE_DIR="${NB_NEW_ITEM_STATE_DIR:-$HOME/.local/share/nb-new-item}"
+COOKIE_JAR="$STATE_DIR/session.cookies"
+LAST_USER_FILE="$STATE_DIR/last-username"
+mkdir -p "$STATE_DIR"
+
+# ── Session (login once, reuse; re-login on expiry) ─────────────────────────
+_session_valid() {
+    [[ -f "$COOKIE_JAR" ]] || return 1
+    local code
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" "$NB_WEB_URL/api/notebooks" 2>>"$LOG")
+    [[ "$code" == "200" ]]
+}
+
+_login() {
+    local default_user
+    default_user="$([[ -f "$LAST_USER_FILE" ]] && cat "$LAST_USER_FILE" || echo "")"
+
+    local creds
+    if ! creds=$(zenity --forms \
+            --title="nb-web login" \
+            --text="Sign in to <b>$NB_WEB_URL</b>" \
+            --add-entry="Username" \
+            --add-password="Password" \
+            --separator="|" 2>/dev/null); then
+        return 1
+    fi
+    local user pass
+    user="$(cut -d'|' -f1 <<< "$creds")"
+    pass="$(cut -d'|' -f2 <<< "$creds")"
+    [[ -z "$user" ]] && user="$default_user"
+    [[ -z "$user" || -z "$pass" ]] && return 1
+
+    : > "$COOKIE_JAR"
+    local code
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -c "$COOKIE_JAR" -X POST "$NB_WEB_URL/login" \
+               --data-urlencode "username=$user" --data-urlencode "password=$pass" 2>>"$LOG")
+    if [[ "$code" != "302" ]]; then
+        zenity --error --title="nb new item" --text="Login failed (check username/password)." 2>/dev/null
+        return 1
+    fi
+    echo "$user" > "$LAST_USER_FILE"
+    return 0
+}
+
+if ! _session_valid; then
+    echo "no valid session, logging in"
+    if ! _login; then
+        exit 1
+    fi
+fi
 
 # ── Resolve file path(s) ────────────────────────────────────────────────────
 decode_uri() {
@@ -71,23 +128,18 @@ else
     STEM="$FIRST_BASENAME"
 fi
 
-# ── nb-web reachable + token present ────────────────────────────────────────
-if [[ ! -f "$TOKEN_FILE" ]]; then
-    zenity --error --title="nb new item" \
-           --text="No API token found at:\n<tt>$TOKEN_FILE</tt>\n\nStart nb-web once to generate it, or set NB_WEB_API_TOKEN_FILE." \
-           2>/dev/null
-    exit 1
-fi
-API_TOKEN="$(<"$TOKEN_FILE")"
-
-# ── Step 1: Notebook ─────────────────────────────────────────────────────────
-NB_BIN="$(command -v nb 2>/dev/null || echo "$HOME/.local/bin/nb")"
+# ── Step 1: Notebook -- via the API (not the local nb CLI: this script may
+# be running on a machine that has no local notebooks at all, e.g. a second
+# real user's own laptop; the API also naturally respects their notebooks:
+# scope, so a restricted account only ever sees what they're allowed to) ───
 mapfile -t NB_NAMES < <(
-    "$NB_BIN" notebooks --no-color 2>/dev/null \
-    | sed 's/[[:space:]].*//' \
-    | grep -v '^$' || true
+    curl -sS -b "$COOKIE_JAR" "$NB_WEB_URL/api/notebooks" 2>>"$LOG" | jq -r '.notebooks[]' 2>>"$LOG"
 )
 echo "notebooks: ${NB_NAMES[*]}"
+if [[ ${#NB_NAMES[@]} -eq 0 ]]; then
+    zenity --error --title="nb new item" --text="No notebooks available for this account." 2>/dev/null
+    exit 1
+fi
 
 IMG_LABEL="${FIRST_BASENAME}$([[ ${#FILES[@]} -gt 1 ]] && echo " (+$((${#FILES[@]}-1)) more)")"
 
@@ -127,7 +179,7 @@ echo "code: $CODE  title: $TITLE"
 
 # ── POST to /api/item/new ────────────────────────────────────────────────────
 CURL_ARGS=(-sS -X POST "$NB_WEB_URL/api/item/new"
-           -H "X-Nbweb-Api-Token: $API_TOKEN"
+           -b "$COOKIE_JAR"
            -F "notebook=$NOTEBOOK" -F "code=$CODE" -F "title=$TITLE")
 for f in "${FILES[@]}"; do
     CURL_ARGS+=(-F "files=@$f")
