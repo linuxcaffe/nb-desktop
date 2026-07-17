@@ -48,6 +48,24 @@ Open nb-web after to fill in the remaining item fields — the item specialty
 header's Fields modal auto-opens for exactly this if you use the in-app
 "+ New" button instead; from Caja you'll want to open the item manually.
 
+#### Also available from Pix
+
+Pix's own "Personalize" scripts (Tools ▸ Personalize) can run the same
+`nb-new-item` — no Pix extension development needed, no new script. The
+installer wires up an entry called **Add New Item (nb)** automatically:
+crop/tag/rename your images in Pix first, select the finished ones, then
+Tools ▸ Personalize ▸ **Add New Item (nb)** runs the exact same flow as the
+Caja version above, on whatever's selected in Pix.
+
+Pix stores Personalize scripts in one file it owns and rewrites on its own
+schedule, `~/.config/pix/scripts.xml` — there's no drop-in folder like Caja's
+Scripts menu. `install.sh` merges the `nb-add-new-item` entry into that file
+by `id` (via `pix/install-script.py`), leaving any scripts you've defined
+yourself through Pix's UI untouched. **Quit Pix before running the
+installer** — if Pix is open, it holds its own in-memory copy of
+`scripts.xml` and will overwrite the file (silently dropping this entry)
+the next time it saves or exits.
+
 **Requires nb-web running** (default `http://127.0.0.1:5001` — override with
 `NB_WEB_URL` for a remote install, e.g. a second real user's own machine:
 `export NB_WEB_URL=http://10.0.0.19:5001`, or a Tailscale address). Auth is a
@@ -75,6 +93,7 @@ All activity is logged to `/tmp/nb-new-item.log`.
 - Caja (Linux Mint MATE, Ubuntu MATE) and/or Nemo (Linux Mint Cinnamon)
 - `curl` and `jq` — Add New Item only, to call nb-web's API
 - [nb-web](https://github.com/linuxcaffe/nb-web) running — Add New Item only
+- [Pix](https://github.com/linuxmint/pix) (optional) — for the Pix Personalize entry; `python3` also needed for the `scripts.xml` merge
 
 ---
 
@@ -120,6 +139,9 @@ Right-click an image → **Scripts → Add New Item**
 ### From Nemo
 Right-click any file → **Import to nb**
 
+### From Pix
+Select image(s) → **Tools ▸ Personalize ▸ Add New Item (nb)**
+
 ### From the terminal
 ```bash
 nb send ~/Pictures/photo.jpg
@@ -136,6 +158,7 @@ nb-new-item ~/Pictures/ABC001.jpg ~/Pictures/ABC001-b.jpg   # primary + suppleme
 |---|---|---|
 | Caja | Linux Mint MATE, Ubuntu MATE | Scripts menu — `~/.config/caja/scripts/Import to nb` |
 | Nemo | Linux Mint Cinnamon | Action file — `~/.local/share/nemo/actions/nb-import.nemo_action` |
+| Pix | any (image manager, not a file manager) | Personalize script — `~/.config/pix/scripts.xml`, Add New Item only |
 
 ---
 
@@ -149,6 +172,9 @@ caja/
   Add New Item          # Caja shim — exec nb-new-item
 nemo/
   nb-import.nemo_action # Nemo action template — generated (not symlinked) at install time
+pix/
+  nb-add-new-item.script.xml # Pix Personalize <script> entry — Add New Item (nb)
+  install-script.py     # Merges the entry into ~/.config/pix/scripts.xml by id
 install.sh              # Installs plugin + file manager hooks + nb-new-item (symlinks throughout, except the templated Nemo action)
 ```
 

@@ -1,0 +1,1 @@
+<script id="nb-add-new-item" display-name="Add New Item (nb)" command="nb-new-item %F" shell-script="false" for-each-file="false" wait-command="false"/>

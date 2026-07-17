@@ -72,3 +72,27 @@ mkdir -p "$HOME/.local/bin"
 chmod +x "$SCRIPT_DIR/bin/nb-new-item"
 ln -sf "$SCRIPT_DIR/bin/nb-new-item" "$HOME/.local/bin/nb-new-item"
 echo "✓ nb-new-item → $HOME/.local/bin/nb-new-item (symlink)"
+
+# ── Pix ──────────────────────────────────────────────────────────────────────
+# Pix (Linux Mint's image manager) has no drop-in scripts folder like Caja --
+# custom "Personalize" commands live in one file, ~/.config/pix/scripts.xml,
+# that Pix itself reads and rewrites. install-script.py merges our entry in
+# by id rather than overwriting the file, so any scripts the user has already
+# defined via Pix's own UI are left untouched.
+if command -v pix &>/dev/null; then
+    if command -v python3 &>/dev/null; then
+        PIX_CONFIG_DIR="$HOME/.config/pix"
+        mkdir -p "$PIX_CONFIG_DIR"
+        python3 "$SCRIPT_DIR/pix/install-script.py" \
+            "$SCRIPT_DIR/pix/nb-add-new-item.script.xml" \
+            "$PIX_CONFIG_DIR/scripts.xml"
+        echo "✓ Pix Personalize script → $PIX_CONFIG_DIR/scripts.xml (Add New Item)"
+        echo "  Quit Pix before running this installer if it's currently open --"
+        echo "  Pix rewrites scripts.xml from memory on save/exit and would clobber this."
+        echo "  Usage: select image(s) in Pix → Tools ▸ Personalize ▸ Add New Item (nb)"
+    else
+        echo "  Pix found but python3 missing, skipping Pix Personalize script"
+    fi
+else
+    echo "  Pix not found, skipping"
+fi
