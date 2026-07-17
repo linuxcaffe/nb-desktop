@@ -23,6 +23,13 @@
 # install, e.g. a second real user's own machine: export
 # NB_WEB_URL=http://10.0.0.19:5001, or the Tailscale address).
 #
+# Tags: best-effort, optional. If python3 + GExiv2 are available (already
+# true wherever Pix is installed -- same library it uses internally, no
+# extra package needed), reads each selected file's embedded IPTC/XMP
+# Keywords and pre-fills the new item's tags: field. Only works if Pix's
+# "store metadata in files" setting is on; silently yields nothing otherwise
+# -- this never blocks item creation.
+#
 # Auth: a real per-user session-cookie login (username/password, prompted
 # via zenity on first use), NOT the shared local .api_token -- that token
 # is bound to one fixed account, so every script invocation using it would
@@ -121,6 +128,40 @@ for f in "${FILES[@]}"; do
 done
 echo "files: ${FILES[*]}"
 
+# ── Tags: best-effort read of embedded IPTC/XMP Keywords off each selected
+# file (Pix writes tags there when "store metadata in files" is enabled --
+# GExiv2, not exiftool, since that's the library Pix itself already uses and
+# needs no extra install). Silently yields nothing if GExiv2 is unavailable
+# or the files just have no tags -- this is a bonus, never a hard dependency.
+TAGS_CSV=""
+if command -v python3 &>/dev/null; then
+    TAGS_CSV="$(python3 - "${FILES[@]}" <<'PYEOF' 2>>"$LOG"
+import sys
+try:
+    import gi
+    gi.require_version('GExiv2', '0.10')
+    from gi.repository import GExiv2
+except Exception:
+    sys.exit(0)
+
+tags = []
+for path in sys.argv[1:]:
+    try:
+        md = GExiv2.Metadata()
+        md.open_path(path)
+        for key in ('Iptc.Application2.Keywords', 'Xmp.dc.subject', 'Xmp.iptc.Keywords'):
+            for t in (md.try_get_tag_multiple(key) or []):
+                t = t.strip()
+                if t and t not in tags:
+                    tags.append(t)
+    except Exception:
+        pass
+print(','.join(tags))
+PYEOF
+)"
+fi
+echo "tags: $TAGS_CSV"
+
 FIRST_BASENAME="$(basename "${FILES[0]}")"
 if [[ "$FIRST_BASENAME" == *.* && "${FIRST_BASENAME:0:1}" != "." ]]; then
     STEM="${FIRST_BASENAME%.*}"
@@ -181,6 +222,7 @@ echo "code: $CODE  title: $TITLE"
 CURL_ARGS=(-sS -X POST "$NB_WEB_URL/api/item/new"
            -b "$COOKIE_JAR"
            -F "notebook=$NOTEBOOK" -F "code=$CODE" -F "title=$TITLE")
+[[ -n "$TAGS_CSV" ]] && CURL_ARGS+=(-F "tags=$TAGS_CSV")
 for f in "${FILES[@]}"; do
     CURL_ARGS+=(-F "files=@$f")
 done
@@ -207,6 +249,7 @@ SELECTOR="$(jq -r '.selector' <<< "$RESPONSE")"
 FAILURES="$(jq -r '.failures | length' <<< "$RESPONSE")"
 
 MSG="✓ <b>items/$ITEM.md</b>\n✓ $N_IMAGES image(s)\n\nSaved to notebook: <b>$NOTEBOOK</b>"
+[[ -n "$TAGS_CSV" ]] && MSG+="\n✓ tags: ${TAGS_CSV//,/, }"
 [[ "$FAILURES" != "0" ]] && MSG+="\n\n⚠ $FAILURES image(s) failed — see $LOG"
 MSG+="\n\nOpen nb-web to complete the item details."
 

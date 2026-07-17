@@ -41,6 +41,11 @@ items):
 - Creates `items/ABC001.md` from the item template (`.templates/item.md`),
   with `image:`, `title:`, and `date:` pre-filled (`image:` becomes a YAML
   list when there's more than one image)
+- If the selected image(s) carry embedded IPTC/XMP Keywords (Pix writes
+  tags there when its "store metadata in files" setting is on), those
+  become the item's `tags:` list too — read via GExiv2, the same library
+  Pix itself uses, so no extra install. Best-effort: if there are no tags,
+  or GExiv2 isn't available, `tags:` is just left empty as before.
 - Updates both `.index` files and makes a single git commit
 
 Designed for [nb-website](https://github.com/linuxcaffe/nb-website) workflows.
